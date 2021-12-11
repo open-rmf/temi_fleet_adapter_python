@@ -1,0 +1,4 @@
+.rmf_schedule_node.yaml
+*.swp
+*.swo
+web_server.log

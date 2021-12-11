@@ -1,0 +1,65 @@
+# FLEET CONFIG =================================================================
+# RMF Fleet parameters
+
+rmf_fleet:
+  name: "TemiFleet"
+  limits:
+    linear: [0.6, 0.3] # velocity, acceleration
+    angular: [0.8, 2.0] # velocity, acceleration
+  profile: # Robot profile is modelled as a circle
+    footprint: 0.3 # radius in m
+    vicinity: 0.5 # radius in m
+  reversible: False # whether robots in this fleet can reverse
+  battery_system:
+    voltage: 12.0 # V
+    capacity: 24.0 # Ahr
+    charging_current: 5.0 # A
+  mechanical_system:
+    mass: 20.0 # kg
+    moment_of_inertia: 10.0 #kgm^2
+    friction_coefficient: 0.22
+  ambient_system:
+    power: 20.0 # W
+  tool_system:
+    power: 0.0 # W
+  recharge_threshold: 0.10 # Battery level below which robots in this fleet will not operate
+  recharge_soc: 1.0 # Battery level to which robots in this fleet should be charged up to during recharging tasks
+  publish_fleet_state: True
+  account_for_battery_drain: True
+  task_capabilities: # Specify the types of RMF Tasks that robots in this fleet are capable of performing
+    loop: True
+    delivery: False
+    clean: False
+    finishing_request: "nothing" # [park, charge, nothing]
+
+# DeliveryBot CONFIG =================================================================
+
+robots:
+  # Here the user is expected to append the configuration for each robot in the
+  # fleet.
+  # Configuration for first robot in this fleet
+  temi_0:
+    robot_config:
+      base_url: "http://0.0.0.0:8008"  # websocket endpoint
+      user: "some_user"
+      password: "some_password"
+      fleet_name: "TemiFleet"
+      max_delay: 10.0
+    rmf_config:
+      robot_state_update_frequency: 0.5
+      start:
+        map_name: "L1"
+        # waypoint: "charger_deliverybot1" # Optional
+        # orientation: 0.0 # Optional, radians
+        waypoint: null
+        orientation: null
+      charger:
+        waypoint: "supplies"
+
+reference_coordinates:
+  rmf: [[19.9, -3.407],             # lounge
+        [6.264, -3.516],            # supplies
+        [20.42, -5.312]]            # tinyRobot2_charger
+  robot: [[3.047, 4.19],
+          [0.3827, -0.071],
+          [3.7898, 4.0463]]
