@@ -28,6 +28,13 @@ async def robot_state(sid, data):
     for room in sio.rooms(sid):
         await sio.emit('robot_state', {'data': data}, room=room)
     print('robot_state: ', data)
+    
+
+@sio.event
+async def battery_status(sid, data):
+    for room in sio.rooms(sid):
+        await sio.emit('battery_status', {'data': data}, room=room)
+    print('battery_status: ', data)
 
 
 @sio.event
@@ -66,10 +73,10 @@ async def stopMovement(sid, data):
 
 
 @sio.event
-async def webView(sid, data):
+async def telepresence(sid, data):
     for room in sio.rooms(sid):
-        await sio.emit('webView', {'data': data}, room=room)
-    print('webView: ', data)
+        await sio.emit('telepresence', {'data': data}, room=room)
+    print('telepresence: ', data)
 
 
 def main():

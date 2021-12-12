@@ -19,6 +19,7 @@ import math
 import time
 import copy
 from rmf_fleet_msgs.msg import Location
+from rclpy.time import Time
 from rclpy.node import Node
 import temi_fleet_adapter_python.msg_definitions as msg
 
@@ -30,6 +31,10 @@ class State:
         self.current_loc = Location()
         self.target_loc = Location()
         self.vehicle_traits = vehicle_traits
+        self.battery_level = 100.0
+        self.is_charging = False
+        self.teleop_mode = False
+        self.last_teleop_msg_time = Time()
 
     def duration_to_target(self):
         return int(self.disp()/self.vehicle_traits.linear.nominal_velocity) + \
@@ -57,6 +62,7 @@ class RobotAPI(Node):
         self.config = config
         self.sio = socketio.Client()
         self.state = State(vehicle_traits)
+        self.state.last_teleop_msg_time = self.get_clock().now()
 
         # Task housekeeping
         self.task_id = -1
@@ -89,6 +95,26 @@ class RobotAPI(Node):
                 self.get_logger().info("You might observe the robot driving.")
                 time.sleep(1)
 
+        @self.sio.event
+        def battery_status(data):
+            json_msg = json.loads(data["data"])
+            self.state.battery_level = float(json_msg['level'])
+            self.state.is_charging = json_msg['isCharging']
+
+        @self.sio.event
+        def skidJoy(data):
+            self.state.last_teleop_msg_time = self.get_clock().now()
+            if not self.state.teleop_mode:
+                self.state.teleop_mode = True
+                self.get_logger().info("SHIFTING TO TELEOP MODE")
+
+        @self.sio.event
+        def turnBy(data):
+            self.state.last_teleop_msg_time = self.get_clock().now()
+            if not self.state.teleop_mode:
+                self.get_logger().info("SHIFTING TO TELEOP MODE")
+                self.state.teleop_mode = True
+
     def position(self):
         return(self.state.current_loc.x,
                self.state.current_loc.y,
@@ -101,7 +127,13 @@ class RobotAPI(Node):
         target_loc.yaw = pose[2]
         self.state.target_loc = target_loc
 
-        t = self.get_clock().now().to_msg()
+        t = self.get_clock().now()
+        # Check if we should be out of teleop mode (5 seconds)
+        if (t - self.state.last_teleop_msg_time).nanoseconds > 5000000000:
+            if self.state.teleop_mode:
+                self.get_logger().info("RESUMING RMF CONTROL")
+                self.state.teleop_mode = False
+
         duration_to_target_loc = self.state.duration_to_target()
 
         if not self.navigation_completed():
@@ -110,7 +142,8 @@ class RobotAPI(Node):
             json_msg["y"] = target_loc.y
             json_msg["yaw"] = target_loc.yaw
             json_msg["tiltAngle"] = 50
-            self.sio.emit("goToPosition", json_msg)
+            if not self.state.teleop_mode:
+                self.sio.emit("goToPosition", json_msg)
 
         return True
 
@@ -135,5 +168,4 @@ class RobotAPI(Node):
         return False
 
     def battery_soc(self):
-        # BH(TODO): Ain't got time for that, full charge!
-        return 1.0
+        return float(self.state.battery_level / 100.0)
