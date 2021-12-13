@@ -109,7 +109,7 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             robot_name=name,
             config=self.config,
             vehicle_traits=vehicle_traits,
-            )
+        )
         assert self.api.connected, "Unable to connect to Robot API server"
 
         self.position = self.get_position()  # RMF coordinates
@@ -187,10 +187,10 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             self.clear()
 
     def follow_new_path(
-        self,
-        waypoints,
-        next_arrival_estimator,
-        path_finished_callback):
+            self,
+            waypoints,
+            next_arrival_estimator,
+            path_finished_callback):
 
         self.stop()
         self._quit_path_event.clear()
@@ -206,9 +206,9 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
         def _follow_path():
             target_pose = []
             while (
-                self.remaining_waypoints or
-                self.state == RobotState.MOVING or
-                self.state == RobotState.WAITING):
+                    self.remaining_waypoints or
+                    self.state == RobotState.MOVING or
+                    self.state == RobotState.WAITING):
                 # Check if we need to abort
                 if self._quit_path_event.is_set():
                     self.node.get_logger().info("Aborting previously followed "
@@ -225,6 +225,10 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                         target_pose[:2])
                     theta = target_pose[2] + \
                         self.transforms['orientation_offset']
+                    if theta > np.pi:
+                        theta = theta - (2 * np.pi)
+                        if theta < -np.pi:
+                            theta = (2 * np.pi) + theta
                     # ------------------------ #
                     # IMPLEMENT YOUR CODE HERE #
                     # Ensure x, y, theta are in units that api.navigate() #
@@ -283,12 +287,12 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                                 # The robot may either be on the previous
                                 # waypoint or the target one
                                 if self.target_waypoint.graph_index is not \
-                                    None and self.dist(self.position, target_pose) < 0.5:
+                                        None and self.dist(self.position, target_pose) < 0.5:
                                     self.on_waypoint = self.target_waypoint.graph_index
                                 elif self.last_known_waypoint_index is not \
                                     None and self.dist(
-                                    self.position, self.graph.get_waypoint(
-                                      self.last_known_waypoint_index).location) < 0.5:
+                                        self.position, self.graph.get_waypoint(
+                                        self.last_known_waypoint_index).location) < 0.5:
                                     self.on_waypoint = self.last_known_waypoint_index
                                 else:
                                     self.on_lane = None  # update_off_grid()
@@ -448,8 +452,8 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                 self.update_handle.update_off_grid_position(
                     self.position, self.dock_waypoint_index)
             # if robot is merging into a waypoint
-            elif (self.target_waypoint is not None and \
-                self.target_waypoint.graph_index is not None):
+            elif (self.target_waypoint is not None and
+                  self.target_waypoint.graph_index is not None):
                 self.update_handle.update_off_grid_position(
                     self.position, self.target_waypoint.graph_index)
             else:  # if robot is lost
@@ -504,4 +508,3 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
         for i in range(len(waypoints)):
             remaining_waypoints.append((i, waypoints[i]))
         return remaining_waypoints
-

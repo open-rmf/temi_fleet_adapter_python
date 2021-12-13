@@ -7,8 +7,8 @@ rmf_fleet:
     linear: [0.6, 0.3] # velocity, acceleration
     angular: [0.8, 2.0] # velocity, acceleration
   profile: # Robot profile is modelled as a circle
-    footprint: 0.3 # radius in m
-    vicinity: 0.5 # radius in m
+    footprint: 0.6 # radius in m
+    vicinity: 0.8 # radius in m
   reversible: False # whether robots in this fleet can reverse
   battery_system:
     voltage: 12.0 # V
@@ -44,9 +44,9 @@ robots:
       user: "some_user"
       password: "some_password"
       fleet_name: "TemiFleet"
-      max_delay: 66660.0
+      max_delay: 20.0
     rmf_config:
-      robot_state_update_frequency: 0.5
+      robot_state_update_frequency: 1.0
       start:
         map_name: "L1"
         # waypoint: "charger_deliverybot1" # Optional

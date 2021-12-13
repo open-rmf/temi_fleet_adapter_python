@@ -16,6 +16,7 @@
 import socketio
 import json
 import math
+import numpy as np
 import time
 import copy
 from rmf_fleet_msgs.msg import Location
@@ -37,9 +38,14 @@ class State:
         self.last_teleop_msg_time = Time()
 
     def duration_to_target(self):
-        return int(self.disp()/self.vehicle_traits.linear.nominal_velocity) + \
-            int(abs(abs(self.current_loc.yaw) - abs(self.target_loc.yaw)) /
-                self.vehicle_traits.rotational.nominal_velocity)
+        yaw_delta = self.current_loc.yaw - self.target_loc.yaw
+        if yaw_delta > np.pi:
+            yaw_delta = yaw_delta - (2 * np.pi)
+            if yaw_delta < -np.pi:
+                yaw_delta = (2 * np.pi) + yaw_delta
+
+        return float(self.disp()/self.vehicle_traits.linear.nominal_velocity) + \
+            float(abs(yaw_delta)) / float(self.vehicle_traits.rotational.nominal_velocity)
 
     def disp(self):
         return self._disp(self.target_loc, self.current_loc)
@@ -73,27 +79,12 @@ class RobotAPI(Node):
         @self.sio.event
         def robot_state(data):
             json_msg = json.loads(data["data"])
-            self.state.current_loc.x = json_msg["x"]
-            self.state.current_loc.y = json_msg["y"]
-            self.state.current_loc.yaw = json_msg["yaw"]
+            self.state.current_loc.x = float(json_msg["x"])
+            self.state.current_loc.y = float(json_msg["y"])
+            self.state.current_loc.yaw = float(json_msg["yaw"])
             if not self.state.initialized:
                 self.state.target_loc = self.state.current_loc
                 self.state.initialized = True
-
-        self.sio.connect(
-            self.server_endpoint,
-            headers={"robot_name": robot_name})
-        while True:
-            json_msg = copy.deepcopy(msg.SKIDJOY_DEFINITION)
-            json_msg["x"] = 0.1
-            self.sio.emit("skidJoy", json_msg)
-            if self.state.initialized:
-                self.connected = True
-                break
-            else:
-                self.get_logger().info("Initializing robot state.")
-                self.get_logger().info("You might observe the robot driving.")
-                time.sleep(1)
 
         @self.sio.event
         def battery_status(data):
@@ -115,7 +106,23 @@ class RobotAPI(Node):
                 self.get_logger().info("SHIFTING TO TELEOP MODE")
                 self.state.teleop_mode = True
 
+        self.sio.connect(
+            self.server_endpoint,
+            headers={"robot_name": robot_name})
+        while True:
+            json_msg = copy.deepcopy(msg.SKIDJOY_DEFINITION)
+            json_msg["x"] = 0.1
+            self.sio.emit("skidJoy", json_msg)
+            if self.state.initialized:
+                self.connected = True
+                break
+            else:
+                self.get_logger().info("Initializing robot state.")
+                self.get_logger().info("You might observe the robot driving.")
+                time.sleep(1)
+
     def position(self):
+        print("GETTING POSITION")
         return(self.state.current_loc.x,
                self.state.current_loc.y,
                self.state.current_loc.yaw)
@@ -159,7 +166,8 @@ class RobotAPI(Node):
 
     def navigation_completed(self):
         # BH(WARN): Arbitrary threshold
-        if (self.state.duration_to_target() < 0.05):
+        print(f"DURATION TO TARGET: {self.state.duration_to_target()}")
+        if (self.state.duration_to_target() < 0.25):
             return True
         else:
             return False
@@ -168,4 +176,5 @@ class RobotAPI(Node):
         return False
 
     def battery_soc(self):
+        print("BATTERY")
         return float(self.state.battery_level / 100.0)
