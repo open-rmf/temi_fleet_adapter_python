@@ -79,6 +79,13 @@ async def telepresence(sid, data):
     print('telepresence: ', data)
 
 
+@sio.event
+async def goTo(sid, data):
+    for room in sio.rooms(sid):
+        await sio.emit('goTo', {'data': data}, room=room)
+    print('goTo: ', data)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=False,

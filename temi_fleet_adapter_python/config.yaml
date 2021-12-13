@@ -44,7 +44,7 @@ robots:
       user: "some_user"
       password: "some_password"
       fleet_name: "TemiFleet"
-      max_delay: 10.0
+      max_delay: 66660.0
     rmf_config:
       robot_state_update_frequency: 0.5
       start:
@@ -54,12 +54,12 @@ robots:
         waypoint: null
         orientation: null
       charger:
-        waypoint: "supplies"
+        waypoint: "lounge"
 
 reference_coordinates:
   rmf: [[19.9, -3.407],             # lounge
         [6.264, -3.516],            # supplies
         [20.42, -5.312]]            # tinyRobot2_charger
-  robot: [[3.047, 4.19],
-          [0.3827, -0.071],
-          [3.7898, 4.0463]]
+  robot: [[0.6886, -1.514],
+          [1.1169, -14.3193],
+          [1.9285, -1.5098]]
