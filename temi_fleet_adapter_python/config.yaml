@@ -38,9 +38,9 @@ robots:
   # Here the user is expected to append the configuration for each robot in the
   # fleet.
   # Configuration for first robot in this fleet
-  temi_0:
+  temi_2:
     robot_config:
-      base_url: "http://0.0.0.0:8008"  # websocket endpoint
+      base_url: "http://10.8.0.1:8008"  # websocket endpoint
       user: "some_user"
       password: "some_password"
       fleet_name: "TemiFleet"
@@ -48,18 +48,14 @@ robots:
     rmf_config:
       robot_state_update_frequency: 1.0
       start:
-        map_name: "L1"
+        map_name: "B1"
         # waypoint: "charger_deliverybot1" # Optional
         # orientation: 0.0 # Optional, radians
-        waypoint: null
-        orientation: null
+        waypoint: "magni2_charger"
+        orientation: 0.0
       charger:
-        waypoint: "lounge"
+        waypoint: "magni2_charger"
 
 reference_coordinates:
-  rmf: [[19.9, -3.407],             # lounge
-        [6.264, -3.516],            # supplies
-        [20.42, -5.312]]            # tinyRobot2_charger
-  robot: [[0.6886, -1.514],
-          [1.1169, -14.3193],
-          [1.9285, -1.5098]]
+  rmf: [[15.01, -24.21], [17.95, -21.91], [9.079, -24.31], [17.75, -15.39]]
+  robot: [[0.542, 1.0585], [2.2852, -1.8151], [-0.5818, 3.4627], [8.5356, -2.79788]]
