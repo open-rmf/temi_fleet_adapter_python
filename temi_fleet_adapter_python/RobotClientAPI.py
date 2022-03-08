@@ -108,6 +108,7 @@ class RobotAPI(Node):
         def _video_join(data):
             t = self.get_clock().now()
             self.state.last_teleop_msg_time = t
+            self.state.teleop_mode = True
 
             print("VIDEO_JOIN")
             print(self.video_join_topic)
@@ -120,6 +121,7 @@ class RobotAPI(Node):
         def _video_leave(data):
             t = self.get_clock().now()
             self.state.last_teleop_msg_time = t
+            self.state.teleop_mode = True
 
             print("VIDEO_LEAVE")
             print(data["id"])
@@ -130,6 +132,7 @@ class RobotAPI(Node):
         def _move(data):
             t = self.get_clock().now()
             self.state.last_teleop_msg_time = t
+            self.state.teleop_mode = True
 
             print("MOVE")
             print(data["id"])
@@ -173,27 +176,24 @@ class RobotAPI(Node):
         def _subscribe(data):
             t = self.get_clock().now()
             self.state.last_teleop_msg_time = t
-
+            self.state.teleop_mode = True
             print('message received with ', data)
 
         @self.sio.event
         def _disconnect():
-            t = self.get_clock().now()
-            self.state.last_teleop_msg_time = t
-
             print('disconnected from server')
 
-        def skidJoy(data):
-            self.state.last_teleop_msg_time = self.get_clock().now()
-            if not self.state.teleop_mode:
-                self.state.teleop_mode = True
-                self.get_logger().info("SHIFTING TO TELEOP MODE")
+        # def skidJoy(data):
+        #     self.state.last_teleop_msg_time = self.get_clock().now()
+        #     if not self.state.teleop_mode:
+        #         self.state.teleop_mode = True
+        #         self.get_logger().info("SHIFTING TO TELEOP MODE")
 
-        def turnBy(data):
-            self.state.last_teleop_msg_time = self.get_clock().now()
-            if not self.state.teleop_mode:
-                self.get_logger().info("SHIFTING TO TELEOP MODE")
-                self.state.teleop_mode = True
+        # def turnBy(data):
+        #     self.state.last_teleop_msg_time = self.get_clock().now()
+        #     if not self.state.teleop_mode:
+        #         self.get_logger().info("SHIFTING TO TELEOP MODE")
+        #         self.state.teleop_mode = True
 
         def on_message(client, userdata, message):
             print(f"Received message with unknown pattern: {message}")
@@ -293,3 +293,6 @@ class RobotAPI(Node):
     def battery_soc(self):
         # print("BATTERY")
         return float(self.state.battery_level / 100.0)
+
+    def on_teleop(self):
+        return self.state.teleop_mode

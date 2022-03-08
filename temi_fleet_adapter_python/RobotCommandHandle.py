@@ -75,6 +75,8 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
         self.state = RobotState.IDLE
         self.dock_name = ""
         self.adapter = adapter
+        self.interruption = None
+        self.is_interrupted = False
 
         self.requested_waypoints = []  # RMF Plan waypoints
         self.remaining_waypoints = []
@@ -426,6 +428,9 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                 self.node.get_logger().warn(
                     "Invalid waypoint supplied for charger. "
                     "Using default nearest charger in the map")
+            def _on_interrupted():
+                self.is_interrupted = True
+            self.interruption = self.update_handle.interrupt(['teleop'], _on_interrupted)
             self.charger_is_set = True
         # Update position
         with self._lock:
