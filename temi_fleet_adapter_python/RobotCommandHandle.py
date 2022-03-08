@@ -179,12 +179,6 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             if self.api.stop():
                 break
             time.sleep(1.0)
-        if self._follow_path_thread is not None:
-            self._quit_path_event.set()
-            if self._follow_path_thread.is_alive():
-                self._follow_path_thread.join()
-            self._follow_path_thread = None
-            self.clear()
 
     def follow_new_path(
             self,
@@ -192,7 +186,12 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             next_arrival_estimator,
             path_finished_callback):
 
-        self.stop()
+        if self._follow_path_thread is not None:
+            self._quit_path_event.set()
+            if self._follow_path_thread.is_alive():
+                self._follow_path_thread.join()
+            self._follow_path_thread = None
+            self.clear()
         self._quit_path_event.clear()
 
         self.node.get_logger().info("Received new path to follow...")

@@ -92,7 +92,7 @@ class RobotAPI(Node):
             if not self.state.initialized:
                 self.state.target_loc = self.state.current_loc
                 self.state.initialized = True
-            print(self.state.current_loc)
+            # print(self.state.current_loc)
 
         def _on_battery_status(client, userstate, msg):
             json_msg = json.loads(msg.payload)
@@ -102,9 +102,6 @@ class RobotAPI(Node):
 
         @self.sio.event
         def _connect():
-            t = self.get_clock().now()
-            self.state.last_teleop_msg_time = t
-
             print('connection established')
 
         @self.sio.on(self.video_join_topic)
@@ -216,8 +213,7 @@ class RobotAPI(Node):
         self.sio.emit('subscribe', {'room': self.video_join_topic})
         self.sio.emit('subscribe', {'room': self.video_leave_topic})
         self.sio.emit('subscribe', {'room': self.move_topic})
-        self.sio.wait()
-
+        # self.sio.wait()
         self.mqtt_client.loop_start()
 
         while True:
@@ -228,6 +224,7 @@ class RobotAPI(Node):
                 f"temi/{self.robot_serial}/command/move/joystick", json.dumps(json_msg))
             if self.state.initialized:
                 self.connected = True
+                self.get_logger().info(f'Connected!')
                 break
             else:
                 self.get_logger().info("Initializing robot state.")
@@ -235,7 +232,7 @@ class RobotAPI(Node):
                 time.sleep(10)
 
     def position(self):
-        print("GETTING POSITION")
+        # print("GETTING POSITION")
         return(self.state.current_loc.x,
                self.state.current_loc.y,
                self.state.current_loc.yaw)
@@ -283,7 +280,9 @@ class RobotAPI(Node):
     def navigation_completed(self):
         # BH(WARN): Arbitrary threshold
         print(f"DURATION TO TARGET: {self.state.duration_to_target()}")
-        if (self.state.duration_to_target() < 0.25):
+        print(f"DISTANCE TO TARGET: {self.state.disp()}")
+        # if (self.state.duration_to_target() < 0.25):
+        if (self.state.disp() < 0.5):
             return True
         else:
             return False
@@ -292,5 +291,5 @@ class RobotAPI(Node):
         return False
 
     def battery_soc(self):
-        print("BATTERY")
+        # print("BATTERY")
         return float(self.state.battery_level / 100.0)

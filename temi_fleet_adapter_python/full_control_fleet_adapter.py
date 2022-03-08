@@ -163,7 +163,7 @@ def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time, server_uri
     # Initialize robots for this fleet
     robots = {}
     for robot_name, robot_config in config_yaml['robots'].items():
-        node.get_logger().info(f"Initializing robot:{robot_name}")
+        node.get_logger().info(f"Initializing robot: {robot_name}")
         rmf_config = robot_config['rmf_config']
         robot_config = robot_config['robot_config']
         initial_waypoint = rmf_config['start']['waypoint']
