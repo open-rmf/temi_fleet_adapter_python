@@ -40,22 +40,24 @@ robots:
   # Configuration for first robot in this fleet
   temi_2:
     robot_config:
-      base_url: "http://10.8.0.1:8008"  # websocket endpoint
+      base_url: "192.168.0.160"  # mqtt endpoint
       user: "some_user"
       password: "some_password"
       fleet_name: "TemiFleet"
+      serial: "00120313953"
       max_delay: 20.0
     rmf_config:
       robot_state_update_frequency: 1.0
       start:
-        map_name: "B1"
+        map_name: "L1"
         # waypoint: "charger_deliverybot1" # Optional
         # orientation: 0.0 # Optional, radians
-        waypoint: "magni2_charger"
+        waypoint: "lounge"
         orientation: 0.0
       charger:
-        waypoint: "magni2_charger"
+        waypoint: "lounge"
 
 reference_coordinates:
-  rmf: [[15.01, -24.21], [17.95, -21.91], [9.079, -24.31], [17.75, -15.39]]
-  robot: [[0.542, 1.0585], [2.2852, -1.8151], [-0.5818, 3.4627], [8.5356, -2.79788]]
+    # Lounge, Pantry, tinyRobot1_charger, tinyRobot2_charger
+  rmf: [[19.89, -3.40], [16.85, -5.40], [10.43, -5.57], [20.42, -5.30]]
+  robot: [[0.623, -0.655], [2.47, -4.153], [3.21, -10.9], [1.904, -0.949]]

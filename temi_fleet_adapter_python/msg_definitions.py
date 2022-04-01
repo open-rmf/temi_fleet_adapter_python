@@ -1,8 +1,8 @@
-GOTOPOSITION_DEFINITION = {
+POSITION_DEFINITION = {
     "x": 0.0,
     "y": 0.0,
     "yaw": 0.0,
-    "tiltAngle": 50
+    "angle": 50
 }
 
 SKIDJOY_DEFINITION = {
@@ -11,20 +11,17 @@ SKIDJOY_DEFINITION = {
 }
 
 TURNBY_DEFINITION = {
-    "degrees": 0,
-    "speed": 0.0,
+    "angle": 0,
 }
 
 TILTBY_DEFINITION = {
-    "degrees": 0,
-    "speed": 0.0,
+    "angle": 0,
 }
 
 STOPMOVEMENT_DEFINITION = {
 }
 
 TELEPRESENCE_DEFINITION = {
-    "id": "temi0"
 }
 
 GOTO_DEFINITION = {
@@ -33,6 +30,6 @@ GOTO_DEFINITION = {
 
 
 BATTERYDATA_DEFINITION = {
-    "level": 100,
+    "percentage": 100,
     "isCharging": False
 }

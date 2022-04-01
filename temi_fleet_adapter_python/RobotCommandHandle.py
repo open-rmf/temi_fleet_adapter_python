@@ -75,6 +75,8 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
         self.state = RobotState.IDLE
         self.dock_name = ""
         self.adapter = adapter
+        self.interruption = None
+        self.is_interrupted = False
 
         self.requested_waypoints = []  # RMF Plan waypoints
         self.remaining_waypoints = []
@@ -179,12 +181,6 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             if self.api.stop():
                 break
             time.sleep(1.0)
-        if self._follow_path_thread is not None:
-            self._quit_path_event.set()
-            if self._follow_path_thread.is_alive():
-                self._follow_path_thread.join()
-            self._follow_path_thread = None
-            self.clear()
 
     def follow_new_path(
             self,
@@ -192,7 +188,12 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             next_arrival_estimator,
             path_finished_callback):
 
-        self.stop()
+        if self._follow_path_thread is not None:
+            self._quit_path_event.set()
+            if self._follow_path_thread.is_alive():
+                self._follow_path_thread.join()
+            self._follow_path_thread = None
+            self.clear()
         self._quit_path_event.clear()
 
         self.node.get_logger().info("Received new path to follow...")
@@ -427,6 +428,9 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                 self.node.get_logger().warn(
                     "Invalid waypoint supplied for charger. "
                     "Using default nearest charger in the map")
+            def _on_interrupted():
+                self.is_interrupted = True
+            self.interruption = self.update_handle.interrupt(['teleop'], _on_interrupted)
             self.charger_is_set = True
         # Update position
         with self._lock:
