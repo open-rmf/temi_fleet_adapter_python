@@ -40,7 +40,7 @@ from .RobotCommandHandle import RobotCommandHandle
 # ------------------------------------------------------------------------------
 
 
-def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time):
+def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time, server_uri):
     # Profile and traits
     fleet_config = config_yaml['rmf_fleet']
     profile = traits.Profile(geometry.make_final_convex_circle(
@@ -89,7 +89,7 @@ def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time):
     adapter.start()
     time.sleep(1.0)
 
-    fleet_handle = adapter.add_fleet(fleet_name, vehicle_traits, nav_graph)
+    fleet_handle = adapter.add_fleet(fleet_name, vehicle_traits, nav_graph, server_uri)
 
     if not fleet_config['publish_fleet_state']:
         fleet_handle.fleet_state_publish_period(None)
@@ -163,7 +163,7 @@ def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time):
     # Initialize robots for this fleet
     robots = {}
     for robot_name, robot_config in config_yaml['robots'].items():
-        node.get_logger().info(f"Initializing robot:{robot_name}")
+        node.get_logger().info(f"Initializing robot: {robot_name}")
         rmf_config = robot_config['rmf_config']
         robot_config = robot_config['robot_config']
         initial_waypoint = rmf_config['start']['waypoint']
@@ -218,6 +218,8 @@ def main(argv=sys.argv):
                         help="Path to the nav_graph for this fleet adapter")
     parser.add_argument("--use_sim_time", action="store_true",
                         help='Use sim time, default: false')
+    parser.add_argument("--server_uri", type=str,
+                        help="Server URI for rmf-web")
     args = parser.parse_args(args_without_ros[1:])
     print(f"Starting fleet adapter...")
 
@@ -240,7 +242,8 @@ def main(argv=sys.argv):
         config_yaml,
         nav_graph_path,
         node,
-        args.use_sim_time)
+        args.use_sim_time,
+        args.server_uri)
 
     # Create executor for the command handle node
     rclpy_executor = rclpy.executors.SingleThreadedExecutor()

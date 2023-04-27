@@ -23,6 +23,7 @@ from rmf_fleet_msgs.msg import Location
 from rclpy.time import Time
 from rclpy.node import Node
 import temi_fleet_adapter_python.msg_definitions as msg
+import paho.mqtt.client as mqtt
 
 
 class State:
@@ -45,7 +46,8 @@ class State:
                 yaw_delta = (2 * np.pi) + yaw_delta
 
         return float(self.disp()/self.vehicle_traits.linear.nominal_velocity) + \
-            float(abs(yaw_delta)) / float(self.vehicle_traits.rotational.nominal_velocity)
+            float(abs(yaw_delta)) / \
+            float(self.vehicle_traits.rotational.nominal_velocity)
 
     def disp(self):
         return self._disp(self.target_loc, self.current_loc)
@@ -66,63 +68,171 @@ class RobotAPI(Node):
         self.connected = False
         self.robot_name = robot_name
         self.config = config
+        self.mqtt_client = mqtt.Client(f"{self.robot_name}_temi_publisher")
         self.sio = socketio.Client()
         self.state = State(vehicle_traits)
         self.state.last_teleop_msg_time = self.get_clock().now()
+        self.video_join_topic = f"/teleoperation/{self.robot_name}/video/join"
+        self.video_leave_topic = f"/teleoperation/{self.robot_name}/video/leave"
+        self.move_topic = f"/teleoperation/{self.robot_name}/move"
 
         # Task housekeeping
         self.task_id = -1
 
         # Initialize
         self.fleet_name = self.config["fleet_name"]
+        self.robot_serial = self.config["serial"]
+        self.mqtt_server_url = self.config["base_url"]
 
-        @self.sio.event
-        def robot_state(data):
-            json_msg = json.loads(data["data"])
-            self.state.current_loc.x = float(json_msg["x"])
-            self.state.current_loc.y = float(json_msg["y"])
+        def _on_robot_state(client, userstate, msg):
+            json_msg = json.loads(msg.payload)
+            self.state.current_loc.x = float(json_msg["position_x"])
+            self.state.current_loc.y = float(json_msg["position_y"])
             self.state.current_loc.yaw = float(json_msg["yaw"])
             if not self.state.initialized:
                 self.state.target_loc = self.state.current_loc
                 self.state.initialized = True
+            # print(self.state.current_loc)
+
+        def _on_battery_status(client, userstate, msg):
+            json_msg = json.loads(msg.payload)
+            self.state.battery_level = float(json_msg['percentage'])
+            self.state.is_charging = json_msg['is_charging']
+            print(self.state.battery_level)
 
         @self.sio.event
-        def battery_status(data):
-            json_msg = json.loads(data["data"])
-            self.state.battery_level = float(json_msg['level'])
-            self.state.is_charging = json_msg['isCharging']
+        def _connect():
+            print('connection established')
+
+        @self.sio.on(self.video_join_topic)
+        def _video_join(data):
+            t = self.get_clock().now()
+            self.state.last_teleop_msg_time = t
+            self.state.teleop_mode = True
+
+            print("VIDEO_JOIN")
+            print(self.video_join_topic)
+            print(data["id"])
+            print(data["data"]["url"])
+            self.mqtt_client.publish(
+                f"temi/{self.robot_serial}/command/media/join", json.dumps({}))
+        
+        @self.sio.on(self.video_leave_topic)
+        def _video_leave(data):
+            t = self.get_clock().now()
+            self.state.last_teleop_msg_time = t
+            self.state.teleop_mode = True
+
+            print("VIDEO_LEAVE")
+            print(data["id"])
+            self.mqtt_client.publish(
+                f"temi/{self.robot_serial}/command/media/leave", json.dumps({}))
+
+        @self.sio.on(self.move_topic)
+        def _move(data):
+            t = self.get_clock().now()
+            self.state.last_teleop_msg_time = t
+            self.state.teleop_mode = True
+
+            print("MOVE")
+            print(data["id"])
+            if data["data"]["name"] == "camera":
+                print("MOVE CAMERA")
+                print(data["data"])
+                json_msg = {}
+                pitch = data['data']['pitch_deg']
+
+                if pitch != 0.0:
+                    if pitch > 0:
+                        json_msg['angle'] = '20'  # default set to 20 deg for now. value has to be int
+                    else:
+                        json_msg['angle'] = '-20'
+                    self.mqtt_client.publish(
+                        f"temi/{self.robot_serial}/command/move/tilt_by", json.dumps(json_msg))
+
+            elif data["data"]["name"] == self.robot_name:
+                print("MOVE ROBOT")
+                print(data["data"])
+                yaw = data['data']['yaw_deg']
+                json_msg = {}
+
+                if yaw != 0.0:  # if turning left/right
+                    if yaw > 0:
+                        json_msg['angle'] = '20'  # default set to 20 deg for now. value has to be int
+                    else:
+                        json_msg['angle'] = '-20'
+                    self.mqtt_client.publish(
+                        f"temi/{self.robot_serial}/command/move/turn_by", json.dumps(json_msg))
+
+                else:  # if moving robot                
+                    json_msg['x'] = data['data']['x_m']
+                    json_msg['y'] = data['data']['y_m']
+                    self.mqtt_client.publish(
+                        f"temi/{self.robot_serial}/command/move/joystick", json.dumps(json_msg))
+            else:
+                print("unknown thing to move!")
 
         @self.sio.event
-        def skidJoy(data):
-            self.state.last_teleop_msg_time = self.get_clock().now()
-            if not self.state.teleop_mode:
-                self.state.teleop_mode = True
-                self.get_logger().info("SHIFTING TO TELEOP MODE")
+        def _subscribe(data):
+            t = self.get_clock().now()
+            self.state.last_teleop_msg_time = t
+            self.state.teleop_mode = True
+            print('message received with ', data)
 
         @self.sio.event
-        def turnBy(data):
-            self.state.last_teleop_msg_time = self.get_clock().now()
-            if not self.state.teleop_mode:
-                self.get_logger().info("SHIFTING TO TELEOP MODE")
-                self.state.teleop_mode = True
+        def _disconnect():
+            print('disconnected from server')
 
-        self.sio.connect(
-            self.server_endpoint,
-            headers={"robot_name": robot_name})
+        # def skidJoy(data):
+        #     self.state.last_teleop_msg_time = self.get_clock().now()
+        #     if not self.state.teleop_mode:
+        #         self.state.teleop_mode = True
+        #         self.get_logger().info("SHIFTING TO TELEOP MODE")
+
+        # def turnBy(data):
+        #     self.state.last_teleop_msg_time = self.get_clock().now()
+        #     if not self.state.teleop_mode:
+        #         self.get_logger().info("SHIFTING TO TELEOP MODE")
+        #         self.state.teleop_mode = True
+
+        def on_message(client, userdata, message):
+            print(f"Received message with unknown pattern: {message}")
+
+        self.mqtt_client.connect(self.mqtt_server_url)
+        self.mqtt_client.message_callback_add(
+            f"temi/{self.robot_serial}/status/position",
+            _on_robot_state)
+        self.mqtt_client.message_callback_add(
+            f"temi/{self.robot_serial}/status/utils/battery",
+            _on_battery_status)
+        self.mqtt_client.subscribe(f"temi/{self.robot_serial}/status/position")
+        self.mqtt_client.subscribe(
+            f"temi/{self.robot_serial}/status/utils/battery")
+
+        self.sio.connect('http://localhost:8000/socket.io')
+        self.sio.emit('subscribe', {'room': self.video_join_topic})
+        self.sio.emit('subscribe', {'room': self.video_leave_topic})
+        self.sio.emit('subscribe', {'room': self.move_topic})
+        # self.sio.wait()
+        self.mqtt_client.loop_start()
+
         while True:
             json_msg = copy.deepcopy(msg.SKIDJOY_DEFINITION)
-            json_msg["x"] = 0.1
-            self.sio.emit("skidJoy", json_msg)
+            json_msg["x"] = '0.1'
+            json_msg["y"] = '0.0'
+            self.mqtt_client.publish(
+                f"temi/{self.robot_serial}/command/move/joystick", json.dumps(json_msg))
             if self.state.initialized:
                 self.connected = True
+                self.get_logger().info(f'Connected!')
                 break
             else:
                 self.get_logger().info("Initializing robot state.")
                 self.get_logger().info("You might observe the robot driving.")
-                time.sleep(1)
+                time.sleep(10)
 
     def position(self):
-        print("GETTING POSITION")
+        # print("GETTING POSITION")
         return(self.state.current_loc.x,
                self.state.current_loc.y,
                self.state.current_loc.yaw)
@@ -144,13 +254,16 @@ class RobotAPI(Node):
         duration_to_target_loc = self.state.duration_to_target()
 
         if not self.navigation_completed():
-            json_msg = copy.deepcopy(msg.GOTOPOSITION_DEFINITION)
+            json_msg = copy.deepcopy(msg.POSITION_DEFINITION)
             json_msg["x"] = target_loc.x
             json_msg["y"] = target_loc.y
             json_msg["yaw"] = target_loc.yaw
-            json_msg["tiltAngle"] = 50
+            json_msg["angle"] = 50
             if not self.state.teleop_mode:
-                self.sio.emit("goToPosition", json_msg)
+                self.mqtt_client.publish(
+                    f"temi/{self.robot_serial}/command/move/position", json.dumps(json_msg))
+                pass
+                # self.sio.emit("goToPosition", json_msg)
 
         return True
 
@@ -158,7 +271,7 @@ class RobotAPI(Node):
         raise NotImplementedError
 
     def stop(self):
-        self.sio.emit("stopMovement", msg.STOPMOVEMENT_DEFINITION)
+        # self.sio.emit("stopMovement", msg.STOPMOVEMENT_DEFINITION)
         return True
 
     def navigation_remaining_duration(self):
@@ -167,7 +280,9 @@ class RobotAPI(Node):
     def navigation_completed(self):
         # BH(WARN): Arbitrary threshold
         print(f"DURATION TO TARGET: {self.state.duration_to_target()}")
-        if (self.state.duration_to_target() < 0.25):
+        print(f"DISTANCE TO TARGET: {self.state.disp()}")
+        # if (self.state.duration_to_target() < 0.25):
+        if (self.state.disp() < 0.5):
             return True
         else:
             return False
@@ -176,5 +291,8 @@ class RobotAPI(Node):
         return False
 
     def battery_soc(self):
-        print("BATTERY")
+        # print("BATTERY")
         return float(self.state.battery_level / 100.0)
+
+    def on_teleop(self):
+        return self.state.teleop_mode
