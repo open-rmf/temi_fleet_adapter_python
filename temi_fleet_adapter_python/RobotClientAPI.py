@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import socketio
 import json
 import math
@@ -84,14 +83,22 @@ class RobotAPI(Node):
         self.robot_serial = self.config["serial"]
         self.mqtt_server_url = self.config["base_url"]
 
-        def _on_robot_state(client, userstate, msg):
+        def _on_connect(client, userstate, msg):
             json_msg = json.loads(msg.payload)
-            self.state.current_loc.x = float(json_msg["position_x"])
-            self.state.current_loc.y = float(json_msg["position_y"])
+            print(f"Connected to MQTT server with message: {json_msg}")
+            self.state.current_loc.x = float(json_msg["x"])
+            self.state.current_loc.y = float(json_msg["y"])
             self.state.current_loc.yaw = float(json_msg["yaw"])
             if not self.state.initialized:
                 self.state.target_loc = self.state.current_loc
                 self.state.initialized = True
+                self.mqtt_client.message_callback_remove(f"temi/{self.robot_serial}/status/info")
+
+        def _on_robot_state(client, userstate, msg):
+            json_msg = json.loads(msg.payload)
+            self.state.current_loc.x = float(json_msg["x"])
+            self.state.current_loc.y = float(json_msg["y"])
+            self.state.current_loc.yaw = float(json_msg["yaw"])
             # print(self.state.current_loc)
 
         def _on_battery_status(client, userstate, msg):
@@ -198,21 +205,27 @@ class RobotAPI(Node):
         def on_message(client, userdata, message):
             print(f"Received message with unknown pattern: {message}")
 
+        self.mqtt_client.username_pw_set(self.user, self.password)
         self.mqtt_client.connect(self.mqtt_server_url)
+        self.mqtt_client.message_callback_add(
+            f"temi/{self.robot_serial}/status/info",
+            _on_connect)
         self.mqtt_client.message_callback_add(
             f"temi/{self.robot_serial}/status/position",
             _on_robot_state)
         self.mqtt_client.message_callback_add(
             f"temi/{self.robot_serial}/status/utils/battery",
             _on_battery_status)
-        self.mqtt_client.subscribe(f"temi/{self.robot_serial}/status/position")
-        self.mqtt_client.subscribe(
-            f"temi/{self.robot_serial}/status/utils/battery")
+        self.mqtt_client.subscribe([
+            (f"temi/{self.robot_serial}/status/info", 0),
+            (f"temi/{self.robot_serial}/status/position", 0),
+            (f"temi/{self.robot_serial}/status/utils/battery", 0)
+        ])
 
-        self.sio.connect('http://localhost:8000/socket.io')
-        self.sio.emit('subscribe', {'room': self.video_join_topic})
-        self.sio.emit('subscribe', {'room': self.video_leave_topic})
-        self.sio.emit('subscribe', {'room': self.move_topic})
+        # self.sio.connect('http://localhost:8000/socket.io')
+        # self.sio.emit('subscribe', {'room': self.video_join_topic})
+        # self.sio.emit('subscribe', {'room': self.video_leave_topic})
+        # self.sio.emit('subscribe', {'room': self.move_topic})
         # self.sio.wait()
         self.mqtt_client.loop_start()
 
