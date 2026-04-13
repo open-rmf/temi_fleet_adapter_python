@@ -12,251 +12,247 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import sys
-import argparse
 import yaml
+import json
 import nudged
+import argparse
 import time
+import threading
+from pprint import pprint
+from functools import partial
 
 import rclpy
 import rclpy.node
 from rclpy.parameter import Parameter
 
-import rmf_adapter as adpt
-import rmf_adapter.vehicletraits as traits
-import rmf_adapter.battery as battery
-import rmf_adapter.geometry as geometry
-import rmf_adapter.graph as graph
-import rmf_adapter.plan as plan
-
-from rmf_task_msgs.msg import TaskProfile, TaskType
-
 from functools import partial
 
-from .RobotCommandHandle import RobotCommandHandle
+import rmf_adapter
+import rmf_adapter.easy_full_control as rmf_easy
+import rmf_adapter.fleet_update_handle as rmf_fleet
+from rmf_adapter import Transformation
+from .robot_adapter_temi import RobotAdapterTemi
 
 # ------------------------------------------------------------------------------
 # Helper functions
 # ------------------------------------------------------------------------------
 
+def sanitise_dict(dictionary, inplace=False, recursive=False):
+    """Remove dictionary Nones."""
+    if type(dictionary) is not dict:
+        return dictionary
 
-def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time, server_uri):
-    # Profile and traits
-    fleet_config = config_yaml['rmf_fleet']
-    profile = traits.Profile(geometry.make_final_convex_circle(
-        fleet_config['profile']['footprint']),
-        geometry.make_final_convex_circle(fleet_config['profile']['vicinity']))
-    vehicle_traits = traits.VehicleTraits(
-        linear=traits.Limits(*fleet_config['limits']['linear']),
-        angular=traits.Limits(*fleet_config['limits']['angular']),
-        profile=profile)
-    vehicle_traits.differential.reversible = fleet_config['reversible']
+    output = {}
 
-    # Battery system
-    voltage = fleet_config['battery_system']['voltage']
-    capacity = fleet_config['battery_system']['capacity']
-    charging_current = fleet_config['battery_system']['charging_current']
-    battery_sys = battery.BatterySystem.make(
-        voltage, capacity, charging_current)
+    if inplace:
+        del_keys = set()
 
-    # Mechanical system
-    mass = fleet_config['mechanical_system']['mass']
-    moment = fleet_config['mechanical_system']['moment_of_inertia']
-    friction = fleet_config['mechanical_system']['friction_coefficient']
-    mech_sys = battery.MechanicalSystem.make(mass, moment, friction)
+        for key, val in dictionary.items():
+            if val is None:
+                del_keys.add(key)
+            elif recursive:
+                sanitise_dict(dictionary[key], True, True)
 
-    # Power systems
-    ambient_power_sys = battery.PowerSystem.make(
-        fleet_config['ambient_system']['power'])
-    tool_power_sys = battery.PowerSystem.make(
-        fleet_config['tool_system']['power'])
+        for key in del_keys:
+            del dictionary[key]
 
-    # Power sinks
-    motion_sink = battery.SimpleMotionPowerSink(battery_sys, mech_sys)
-    ambient_sink = battery.SimpleDevicePowerSink(
-        battery_sys, ambient_power_sys)
-    tool_sink = battery.SimpleDevicePowerSink(battery_sys, tool_power_sys)
+        output = dictionary
+    else:
+        for key, val in dictionary.items():
+            if val is None:
+                continue
+            else:
+                if recursive:
+                    val = sanitise_dict(val, False, True)
+                output[key] = val
 
-    nav_graph = graph.parse_graph(nav_graph_path, vehicle_traits)
+    return output
 
-    # Adapter
-    fleet_name = fleet_config['name']
-    adapter = adpt.Adapter.make(f'{fleet_name}_fleet_adapter')
-    if use_sim_time:
-        adapter.node.use_sim_time()
-    assert adapter, ("Unable to initialize fleet adapter. Please ensure "
-                     "RMF Schedule Node is running")
-    adapter.start()
-    time.sleep(1.0)
 
-    fleet_handle = adapter.add_fleet(fleet_name, vehicle_traits, nav_graph, server_uri)
-
-    if not fleet_config['publish_fleet_state']:
-        fleet_handle.fleet_state_publish_period(None)
-    # Account for battery drain
-    drain_battery = fleet_config['account_for_battery_drain']
-    recharge_threshold = fleet_config['recharge_threshold']
-    recharge_soc = fleet_config['recharge_soc']
-    finishing_request = fleet_config['task_capabilities']['finishing_request']
-    node.get_logger().info(f"Finishing request: [{finishing_request}]")
-    # Set task planner params
-    ok = fleet_handle.set_task_planner_params(
-        battery_sys,
-        motion_sink,
-        ambient_sink,
-        tool_sink,
-        recharge_threshold,
-        recharge_soc,
-        drain_battery,
-        finishing_request)
-    assert ok, ("Unable to set task planner params")
-
-    task_capabilities = []
-    if fleet_config['task_capabilities']['loop']:
-        node.get_logger().info(
-            f"Fleet [{fleet_name}] is configured to perform Loop tasks")
-        task_capabilities.append(TaskType.TYPE_LOOP)
-    if fleet_config['task_capabilities']['delivery']:
-        node.get_logger().info(
-            f"Fleet [{fleet_name}] is configured to perform Delivery tasks")
-        task_capabilities.append(TaskType.TYPE_DELIVERY)
-    if fleet_config['task_capabilities']['clean']:
-        node.get_logger().info(
-            f"Fleet [{fleet_name}] is configured to perform Clean tasks")
-        task_capabilities.append(TaskType.TYPE_CLEAN)
-
-    # Callable for validating requests that this fleet can accommodate
-    def _task_request_check(task_capabilities, msg: TaskProfile):
-        if msg.description.task_type in task_capabilities:
-            return True
-        else:
-            return False
-
-    fleet_handle.accept_task_requests(
-        partial(_task_request_check, task_capabilities))
-
-    # Transforms
-    rmf_coordinates = config_yaml['reference_coordinates']['rmf']
-    robot_coordinates = config_yaml['reference_coordinates']['robot']
-    transforms = {
-        'rmf_to_robot': nudged.estimate(rmf_coordinates, robot_coordinates),
-        'robot_to_rmf': nudged.estimate(robot_coordinates, rmf_coordinates)}
-    transforms['orientation_offset'] = \
-        transforms['rmf_to_robot'].get_rotation()
-    mse = nudged.estimate_error(transforms['rmf_to_robot'],
-                                rmf_coordinates,
-                                robot_coordinates)
-    print(f"Coordinate transformation error: {mse}")
-    print("RMF to Robot transform:")
-    print(f"    rotation:{transforms['rmf_to_robot'].get_rotation()}")
-    print(f"    scale:{transforms['rmf_to_robot'].get_scale()}")
-    print(f"    trans:{transforms['rmf_to_robot'].get_translation()}")
-    print("Robot to RMF transform:")
-    print(f"    rotation:{transforms['robot_to_rmf'].get_rotation()}")
-    print(f"    scale:{transforms['robot_to_rmf'].get_scale()}")
-    print(f"    trans:{transforms['robot_to_rmf'].get_translation()}")
-
-    def _updater_inserter(cmd_handle, update_handle):
-        """Insert a RobotUpdateHandle."""
-        cmd_handle.update_handle = update_handle
-
-    # Initialize robots for this fleet
-    robots = {}
-    for robot_name, robot_config in config_yaml['robots'].items():
-        node.get_logger().info(f"Initializing robot: {robot_name}")
-        rmf_config = robot_config['rmf_config']
-        robot_config = robot_config['robot_config']
-        initial_waypoint = rmf_config['start']['waypoint']
-        initial_orientation = rmf_config['start']['orientation']
-        robot = RobotCommandHandle(
-            name=robot_name,
-            config=robot_config,
-            node=node,
-            graph=nav_graph,
-            vehicle_traits=vehicle_traits,
-            transforms=transforms,
-            map_name=rmf_config['start']['map_name'],
-            initial_waypoint=initial_waypoint,
-            initial_orientation=initial_orientation,
-            charger_waypoint=rmf_config['charger']['waypoint'],
-            update_frequency=rmf_config.get('robot_state_update_frequency', 1),
-            adapter=adapter)
-
-        if robot.initialized:
-            robots[robot_name] = robot
-            # Add robot to fleet
-            fleet_handle.add_robot(robot,
-                                   robot_name,
-                                   profile,
-                                   robot.starts,
-                                   partial(_updater_inserter, robot))
+def compute_transforms(level, coords, node=None):
+    """Get transforms between RMF and robot coordinates."""
+    rotation = None
+    scale = None
+    translation = None
+    if 'rmf' in coords:
+        rmf_coords = coords['rmf']
+        robot_coords = coords['robot']
+        tf = nudged.estimate(rmf_coords, robot_coords)
+        if node:
+            mse = nudged.estimate_error(tf, rmf_coords, robot_coords)
             node.get_logger().info(
-                f"Successfully added new robot:{robot_name}")
+                f"Transformation error estimate for {level}: {mse}"
+            )
+        rotation = tf.get_rotation()
+        scale = tf.get_scale()
+        translation = tf.get_translation()
+    elif 'rotation' in coords:
+        rotation = coords['rotation']
+        scale = coords['scale']
+        translation = coords['translation']
+    else:
+        return None
 
+    return Transformation(
+        rotation,
+        scale,
+        translation
+    )
+
+
+class FleetAdapterTemi:
+    def __init__(
+        self,
+        cmd_node,
+        adapter,
+        fleet_handle,
+        robot_handles: list[RobotAdapterTemi],
+        frequency,
+        event_loop,
+    ):
+        self.event_loop = event_loop
+        self.adapter = adapter
+        self.fleet_handle = fleet_handle
+        self.robot_handles: list[RobotAdapterTemi] = robot_handles
+        self.node = cmd_node
+        if frequency > 0.0:
+            self.period = 1.0/frequency
         else:
-            node.get_logger().error(
-                f"Failed to initialize robot:{robot_name}")
+            raise Exception(f'Invalid robot update frequency: {frequency}')
+        self.robot_update_jobs = {}
 
-    return adapter, fleet_handle, robots
+    async def state_updates(self):
+        robot_updaters = []
+        for robot in self.robot_handles:
+            robot_updaters.append(robot.update_loop(self.period))
+        await asyncio.gather(*robot_updaters)
+
+    def update_loop(self):
+        asyncio.set_event_loop(self.event_loop)
+        self.event_loop.run_until_complete(self.state_updates())
+
+    def start(self):
+        update_thread = threading.Thread(target=self.update_loop)
+        update_thread.start()
+
+        # Create the executor for the logger node
+        rclpy_executor = rclpy.executors.SingleThreadedExecutor()
+        rclpy_executor.add_node(self.node)
+
+        self.adapter.start()
+        rclpy_executor.spin()
+
+        self.node.destroy_node()
+        rclpy_executor.shutdown()
+        rclpy.shutdown()
+
+
+def create_fleet(
+        fleet_config, config_yaml, cmd_node, server_uri) -> FleetAdapterTemi:
+    """Create RMF Adapter and fleet handle"""
+    for level, coords in \
+            config_yaml['conversions']['reference_coordinates'].items():
+        tf = compute_transforms(level, coords, cmd_node)
+        fleet_config.add_robot_coordinates_transformation(level, tf)
+
+    # RMF_CORE Fleet Adapter: Manages delivery or loop requests
+    adapter = rmf_adapter.Adapter.make(
+        config_yaml['node_names']['rmf_fleet_adapter'])
+    assert adapter, ("Adapter could not be init! "
+                     "Ensure a ROS2 scheduler node is running")
+
+    cmd_node.declare_parameter('server_uri', '')
+    server_uri = cmd_node.get_parameter(
+        'server_uri'
+    ).get_parameter_value().string_value
+    if server_uri == '':
+        server_uri = None
+
+    fleet_config.server_uri = server_uri
+    fleet_handle = adapter.add_easy_fleet(fleet_config)
+
+    conversions = config_yaml['conversions']
+    update_frequency = config_yaml['rmf_fleet']['robot_state_update_frequency']
+    debug = config_yaml['rmf_fleet']['debug']
+
+
+    event_loop = asyncio.new_event_loop()
+
+    robots_handles = []
+    for robot_name, rmf_config in \
+            fleet_config.known_robot_configurations.items():
+        temi_config = \
+            config_yaml['rmf_fleet']['robots'][robot_name]['temi_config']
+        robots_handles.append(RobotAdapterTemi(
+            robot_name,
+            rmf_config,
+            temi_config,
+            conversions,
+            fleet_handle,
+            fleet_config,
+            cmd_node,
+            event_loop,
+            debug,
+        ))
+
+    return FleetAdapterTemi(
+        cmd_node, adapter, fleet_handle, robots_handles, update_frequency,
+        event_loop)
 
 
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
 def main(argv=sys.argv):
-    # Init rclpy and adapter
+
+    # INIT RCL ================================================================
     rclpy.init(args=argv)
-    adpt.init_rclcpp()
+    rmf_adapter.init_rclcpp()
     args_without_ros = rclpy.utilities.remove_ros_args(argv)
 
     parser = argparse.ArgumentParser(
-        prog="fleet_adapter",
-        description="Configure and spin up the fleet adapter")
+        prog="fleet_adapter_temi",
+        description="Configure and spin up fleet adapters for Temi robots")
     parser.add_argument("-c", "--config_file", type=str, required=True,
-                        help="Path to the config.yaml file")
+                        help="Input config.yaml file to process")
     parser.add_argument("-n", "--nav_graph", type=str, required=True,
                         help="Path to the nav_graph for this fleet adapter")
-    parser.add_argument("--use_sim_time", action="store_true",
-                        help='Use sim time, default: false')
-    parser.add_argument("--server_uri", type=str,
+    parser.add_argument("-r", "--server_uri", type=str,
+                        required=False, default='',
                         help="Server URI for rmf-web")
     args = parser.parse_args(args_without_ros[1:])
-    print(f"Starting fleet adapter...")
+    print(f"Starting temi fleet adapter...")
 
     config_path = args.config_file
     nav_graph_path = args.nav_graph
+    server_uri = args.server_uri
 
-    # Load config and nav graph yamls
-    with open(config_path, "r") as f:
+    fleet_config = rmf_easy.FleetConfiguration.from_config_files(
+        config_path, nav_graph_path
+    )
+    assert fleet_config, f'Failed to parse config file [{config_path}]'
+
+    with open(config_path, 'r') as f:
         config_yaml = yaml.safe_load(f)
 
-    # ROS 2 node for the command handle
-    node = rclpy.node.Node('robot_command_handle')
+    sanitise_dict(config_yaml, inplace=True, recursive=True)
 
-    # Enable sim time for testing offline
-    if args.use_sim_time:
-        param = Parameter("use_sim_time", Parameter.Type.BOOL, True)
-        node.set_parameters([param])
+    print("\n== Temi Adapter Configuration ==")
+    pprint(config_yaml)
+    print()
 
-    adapter, fleet_handle, robots = initialize_fleet(
-        config_yaml,
-        nav_graph_path,
-        node,
-        args.use_sim_time,
-        args.server_uri)
+    # Create a node to use inside of the Python code for logging
+    cmd_node = rclpy.node.Node(
+        config_yaml['node_names']['robot_command_handle'])
 
-    # Create executor for the command handle node
-    rclpy_executor = rclpy.executors.SingleThreadedExecutor()
-    rclpy_executor.add_node(node)
+    # Create the fleet, including the robots that are in the config file
+    fleet = create_fleet(fleet_config, config_yaml, cmd_node, server_uri)
 
-    # Start the fleet adapter
-    rclpy_executor.spin()
-
-    # Shutdown
-    node.destroy_node()
-    rclpy_executor.shutdown()
-    rclpy.shutdown()
+    # GO!
+    fleet.start()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main(sys.argv)
